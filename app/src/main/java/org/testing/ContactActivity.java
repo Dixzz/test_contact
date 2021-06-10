@@ -2,20 +2,35 @@ package org.testing;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.ActivityManager;
+import android.content.ComponentName;
 import android.content.ContentResolver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.IBinder;
+import android.os.Looper;
+import android.os.Message;
+import android.os.Messenger;
+import android.os.RemoteException;
 import android.provider.ContactsContract;
 import android.util.Log;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.lifecycle.LifecycleOwner;
+import androidx.lifecycle.Observer;
 import androidx.loader.app.LoaderManager;
 import androidx.loader.content.CursorLoader;
 import androidx.loader.content.Loader;
@@ -42,8 +57,8 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
     private Activity activity;
 
     public static final int REQUEST_CODE_ACCESS_CONTACTS = 101;
-    private final Map<String, Test> mContactsByLookupKey = new HashMap<>();
-    private List<Test> list = new ArrayList<>();
+    private final Map<String, ContactClass> mContactsByLookupKey = new HashMap<>();
+    private List<ContactClass> list = new ArrayList<>();
 
     private static final String CONTACTS_SORT = ContactsContract.Contacts.DISPLAY_NAME_PRIMARY + " ASC";
 
@@ -56,6 +71,7 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
 
     private static final int CONTACT_DETAILS_LOADER_ID = 1;
     private static final Uri CONTACT_DETAILS_URI = ContactsContract.Data.CONTENT_URI;
+
     private static final String[] CONTACT_DETAILS_PROJECTION = {
             ContactsContract.Data.MIMETYPE,
             ContactsContract.Data.LOOKUP_KEY,  //use this for filtering
@@ -63,13 +79,109 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
             ContactsContract.CommonDataKinds.Phone.NUMBER,
             ContactsContract.CommonDataKinds.Email.ADDRESS,
     };
+    Handler handler = new Handler(Looper.myLooper()) {
+        @Override
+        public void handleMessage(@NonNull Message msg) {
+            super.handleMessage(msg);
+            Log.d("AAAE", "" + msg);
+        }
+    };
+
+    private ServiceConnection mConnection = new ServiceConnection() {
+        // Called when the connection with the service is established
+        public void onServiceConnected(ComponentName className, IBinder service) {
+            MyService service1 = ((MyService.LocalBinder) service).getService();
+            StringViewModel model = service1.model;
+            if (model != null) {
+                model.getUsers().observeForever(new Observer<String>() {
+                    @Override
+                    public void onChanged(String s) {
+                        Log.d("AAA", "onChanged: "+s);
+                    }
+                });
+            }
+            /*Messenger messenger;
+            Messenger m2 = new Messenger(handler);
+            messenger = new Messenger(service);
+            Log.d("AAAS", "" + service);
+            Message m = Message.obtain();
+
+            if (messenger != null) {
+                try {
+                    m.replyTo = m2;
+                    messenger.send(m);
+                } catch (RemoteException e) {
+                    e.printStackTrace();
+                }
+            }*/
+        }
+
+        // Called when the connection with the service disconnects unexpectedly
+        // Unbind gets called after service completes or destroyed
+        public void onServiceDisconnected(ComponentName className) {
+            mConnection = null;
+            handler = null;
+            //Log.d("AAA", "" + className);
+        }
+    };
+    /*private final BroadcastReceiver mMessageReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            Log.d("AAA", "onReceive: " + intent.getStringExtra("key"));
+            //Toast.makeText(context, message, Toast.LENGTH_SHORT).show();
+        }
+    };*/
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        //LocalBroadcastManager.getInstance(this).registerReceiver(mMessageReceiver, new IntentFilter("someshit"));
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        //LocalBroadcastManager.getInstance(this).unregisterReceiver(mMessageReceiver);
+    }
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         activity = this;
+        Intent intent;
+        setContentView(R.layout.activity_main);
         loadContactsIfPerm();
+        //new Internal
+        intent = new Intent(this, MyService.class);
+
+        if (!isMyServiceRunning(MyService.class)) {
+            bindService(intent, mConnection, Context.BIND_ADJUST_WITH_ACTIVITY);
+            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.O)
+                startForegroundService(intent);
+            else
+                startService(intent);
+        }
         //getContactList();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        //stopService(intent);
+        unbindService(mConnection);
+    }
+
+    private boolean isMyServiceRunning(Class<?> serviceClass) {
+        ActivityManager manager = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+        for (ActivityManager.RunningServiceInfo service : manager.getRunningServices(Integer.MAX_VALUE)) {
+            if (serviceClass.getName().equals(service.service.getClassName())) {
+                Log.i("Service status", "Running");
+                return true;
+            }
+        }
+        Log.i("Service status", "Not running");
+        return false;
     }
 
     @Override
@@ -112,7 +224,7 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
         return null;
     }
 
-    static class Test {
+    static class ContactClass {
         public String name = "";
         public String email = "";
         public List<String> phoneNumbers = new ArrayList<>();
@@ -135,7 +247,7 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
         mContactsByLookupKey.clear();
 
         while (cursor.moveToNext()) {
-            Test t = new Test();
+            ContactClass t = new ContactClass();
             //String displayName = cursor.getString(cursor.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME_PRIMARY));
             String lookupKey = cursor.getString(cursor.getColumnIndex(ContactsContract.Contacts.LOOKUP_KEY));
             mContactsByLookupKey.put(lookupKey, t);
@@ -143,7 +255,7 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
         }
     }
 
-    private Test readContactDetails(Cursor cursor, Test contact) {
+    private ContactClass readContactDetails(Cursor cursor, ContactClass contact) {
         String mime = cursor.getString(cursor.getColumnIndex(ContactsContract.Data.MIMETYPE));
         //Log.d("AAA", "readContactDetails() returned: " + mime);
         if (mime.equals(ContactsContract.CommonDataKinds.Email.CONTENT_ITEM_TYPE)) {
@@ -171,7 +283,7 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
 
             while (cursor.moveToNext()) {
                 String lookupKey = cursor.getString(cursor.getColumnIndex(ContactsContract.Data.LOOKUP_KEY));
-                Test t = mContactsByLookupKey.get(lookupKey);
+                ContactClass t = mContactsByLookupKey.get(lookupKey);
                 if (t != null) {
                     list.add(i, t);
                     list.set(i, readContactDetails(cursor, list.get(i)));
@@ -183,11 +295,11 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
 
         ObjectMapper mapper = new ObjectMapper();
         mapper.enable(SerializationFeature.INDENT_OUTPUT);
-        Test t2 = null;
+        ContactClass t2 = null;
 
         //Need better handling
         for (int i = 0; i < list.size(); i++) {
-            Test t = list.get(i);
+            ContactClass t = list.get(i);
             if (i < list.size() - 1)
                 t2 = list.get(i + 1);
 
@@ -197,7 +309,7 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
                 }
             }
         }
-        for (Test test : list) {
+        for (ContactClass test : list) {
             if (test != null) {
                 JSONObject jsonObject = new JSONObject(mapper.writeValueAsString(test));
                 arrayFinal.put(jsonObject);
