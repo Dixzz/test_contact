@@ -9,76 +9,66 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
+import android.database.ContentObserver;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.Message;
-import android.os.Messenger;
-import android.os.RemoteException;
 import android.provider.ContactsContract;
 import android.util.Log;
-import android.widget.Toast;
+import android.view.DragEvent;
+import android.view.LayoutInflater;
+import android.view.ViewGroup;
+import android.widget.TextView;
 
 import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
-import androidx.lifecycle.LifecycleOwner;
-import androidx.lifecycle.Observer;
-import androidx.loader.app.LoaderManager;
-import androidx.loader.content.CursorLoader;
-import androidx.loader.content.Loader;
+import androidx.recyclerview.widget.RecyclerView;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import com.google.android.material.snackbar.BaseTransientBottomBar;
 import com.google.android.material.snackbar.Snackbar;
 
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
+import org.testing.ContactUtil.ContactPojo;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
+import java.lang.ref.WeakReference;
+import java.util.Date;
 import java.util.List;
-import java.util.Map;
 
-public class ContactActivity extends AppCompatActivity implements LoaderManager.LoaderCallbacks<Cursor> {
+public class ContactActivity extends AppCompatActivity {
     private Activity activity;
 
     public static final int REQUEST_CODE_ACCESS_CONTACTS = 101;
-    private final Map<String, ContactClass> mContactsByLookupKey = new HashMap<>();
-    private List<ContactClass> list = new ArrayList<>();
+    /*private final Map<String, ContactPojo> mContactsByLookupKey = new HashMap<>();
+    private final List<ContactPojo> list = new ArrayList<>();*/
+    private ContentResolver cr;
 
-    private static final String CONTACTS_SORT = ContactsContract.Contacts.DISPLAY_NAME_PRIMARY + " ASC";
+    public static String CONTACTS_SORT = ContactsContract.Contacts.DISPLAY_NAME_PRIMARY + " ASC";
 
-    private static final int CONTACTS_LOADER_ID = 0;
-    private static final Uri CONTACTS_URI = ContactsContract.Contacts.CONTENT_URI;
-    private static final String[] CONTACTS_PROJECTION = new String[]{
+    public static final Uri CONTACTS_URI = ContactsContract.Contacts.CONTENT_URI;
+    public static final String[] CONTACTS_PROJECTION = new String[]{
             ContactsContract.Data.LOOKUP_KEY,
             ContactsContract.Contacts.DISPLAY_NAME_PRIMARY,};
 
-
-    private static final int CONTACT_DETAILS_LOADER_ID = 1;
-    private static final Uri CONTACT_DETAILS_URI = ContactsContract.Data.CONTENT_URI;
-
-    private static final String[] CONTACT_DETAILS_PROJECTION = {
+    public static final Uri CONTACT_DETAILS_URI = ContactsContract.Data.CONTENT_URI;
+    public static final String[] CONTACT_DETAILS_PROJECTION = {
             ContactsContract.Data.MIMETYPE,
-            ContactsContract.Data.LOOKUP_KEY,  //use this for filtering
+            ContactsContract.Contacts._ID,
+            ContactsContract.Data.LOOKUP_KEY,
+            ContactsContract.CommonDataKinds.Identity.CONTACT_LAST_UPDATED_TIMESTAMP,
             ContactsContract.Contacts.DISPLAY_NAME_PRIMARY,
             ContactsContract.CommonDataKinds.Phone.NUMBER,
+            ContactsContract.CommonDataKinds.Phone.TYPE,
             ContactsContract.CommonDataKinds.Email.ADDRESS,
     };
+
+    public static final int CONTACTS_LOADER_ID = 0;
+    public static final int CONTACT_DETAILS_LOADER_ID = 1;
     Handler handler = new Handler(Looper.myLooper()) {
         @Override
         public void handleMessage(@NonNull Message msg) {
@@ -86,42 +76,42 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
             Log.d("AAAE", "" + msg);
         }
     };
-
+    private WeakReference<StringViewModel> model;
+    private MyService service1;
     private ServiceConnection mConnection = new ServiceConnection() {
         // Called when the connection with the service is established
         public void onServiceConnected(ComponentName className, IBinder service) {
-            MyService service1 = ((MyService.LocalBinder) service).getService();
-            StringViewModel model = service1.model;
-            if (model != null) {
-                model.getUsers().observeForever(new Observer<String>() {
-                    @Override
-                    public void onChanged(String s) {
-                        Log.d("AAA", "onChanged: "+s);
-                    }
-                });
-            }
-            /*Messenger messenger;
-            Messenger m2 = new Messenger(handler);
-            messenger = new Messenger(service);
-            Log.d("AAAS", "" + service);
-            Message m = Message.obtain();
-
-            if (messenger != null) {
-                try {
-                    m.replyTo = m2;
-                    messenger.send(m);
-                } catch (RemoteException e) {
-                    e.printStackTrace();
+            //Log.e("AAA", className+" "+service);
+            service1 = ((MyService.LocalBinder) service).getService();
+            service1.componentToBinder.fetchContacts();
+            service1.setBinderToComponent(new MyService.binderToComponent() {
+                @Override
+                public void callback(Object... o) {
+                    //Log.d("AAA", "" + Arrays.toString(o));
                 }
-            }*/
+            });
+            Log.d("AAA", "onServiceConnected: "+service1.model);
+
+            model = new WeakReference<>(service1.model);
+            //List<ContactPojo> list2 = new ArrayList<>();
+            Log.d("AAA", "onServiceConnected: " + model.get().getUsers2().getValue());
+            if (model.get() != null) {
+                //list.clear();
+                //Log.d("AAA", "onServiceConnected: "+model.getUsers2().getValue());
+                ((RecyclerView) findViewById(R.id.listView)).setAdapter(new adapter(model.get().getUsers2().getValue()));
+                //list.clear();
+                //model.getUsers2().observeForever(s -> {
+
+                //});
+            }
         }
 
         // Called when the connection with the service disconnects unexpectedly
         // Unbind gets called after service completes or destroyed
         public void onServiceDisconnected(ComponentName className) {
-            mConnection = null;
+            model.clear();
+            service1 = null;
             handler = null;
-            //Log.d("AAA", "" + className);
         }
     };
     /*private final BroadcastReceiver mMessageReceiver = new BroadcastReceiver() {
@@ -132,37 +122,87 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
         }
     };*/
 
+    Long currentTime = 0L;
+    ContentObserver contentObserver = new ContentObserver(null) {
+        @Override
+        public boolean deliverSelfNotifications() {
+            currentTime = System.currentTimeMillis();
+            return true;
+        }
+
+        @Override
+        public void onChange(boolean selfChange) {
+            new Thread() {
+                @Override
+                public void run() {
+                    checkContactAddedTime(new Date(currentTime));
+                }
+            }.start();
+        }
+    };
+
     @Override
     protected void onStart() {
         super.onStart();
-        //LocalBroadcastManager.getInstance(this).registerReceiver(mMessageReceiver, new IntentFilter("someshit"));
+        currentTime = System.currentTimeMillis();
+        Log.d("AAA", "onStart: " + currentTime);
+        bindService(intent, mConnection, Context.BIND_AUTO_CREATE);
     }
 
     @Override
     protected void onStop() {
         super.onStop();
-        //LocalBroadcastManager.getInstance(this).unregisterReceiver(mMessageReceiver);
+        unbindService(mConnection);
     }
 
+    static class adapter extends commonAdapter {
+        List<ContactPojo> list;
+
+        private static final String TAG = "adapter";
+
+        public adapter(List<ContactPojo> list) {
+            this.list = list;
+        }
+
+        @NonNull
+        @Override
+        public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            return new ViewHolder(LayoutInflater.from(parent.getContext()).inflate(R.layout.holder_test, parent, false));
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
+            super.onBindViewHolder(holder, position);
+            TextView textView = holder.itemView.findViewById(R.id.textView);
+            TextView textView2 = holder.itemView.findViewById(R.id.textView2);
+            TextView textView3 = holder.itemView.findViewById(R.id.textView3);
+            TextView textView4 = holder.itemView.findViewById(R.id.textView4);
+            textView.setText(list.get(position)._ID + "");
+            textView2.setText(list.get(position).name);
+            textView3.setText(list.get(position).email);
+            textView4.setText(list.get(position).phoneNumbers.toString());
+        }
+
+        @Override
+        public int getItemCount() {
+            if (list == null || list.size() == 0)
+                return 0;
+            else return list.size();
+        }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        activity = this;
-        Intent intent;
         setContentView(R.layout.activity_main);
+        activity = this;
+        intent =  new Intent(activity, MyService.class);
+        cr = getContentResolver();
+        findViewById(R.id.top).setOnClickListener(view -> {
+            startActivity(new Intent(this, MainActivity.class));
+        });
+        getContentResolver().registerContentObserver(CONTACTS_URI, true, contentObserver);
         loadContactsIfPerm();
-        //new Internal
-        intent = new Intent(this, MyService.class);
-
-        if (!isMyServiceRunning(MyService.class)) {
-            bindService(intent, mConnection, Context.BIND_ADJUST_WITH_ACTIVITY);
-            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.O)
-                startForegroundService(intent);
-            else
-                startService(intent);
-        }
-        //getContactList();
     }
 
     @Override
@@ -170,6 +210,13 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
         super.onDestroy();
         //stopService(intent);
         unbindService(mConnection);
+        mConnection = null;
+        service1 = null;
+
+        if (contentObserver != null) {
+            getContentResolver().unregisterContentObserver(contentObserver);
+            contentObserver = null;
+        }
     }
 
     private boolean isMyServiceRunning(Class<?> serviceClass) {
@@ -195,8 +242,17 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
     }
 
     private void showSnack(String msg) {
-        Snackbar.make(findViewById(android.R.id.content), msg, BaseTransientBottomBar.LENGTH_LONG).setAnimationMode(BaseTransientBottomBar.ANIMATION_MODE_SLIDE).show();
+        Snackbar snackbar = Snackbar.make(findViewById(android.R.id.content), msg, BaseTransientBottomBar.LENGTH_LONG).setAnimationMode(BaseTransientBottomBar.ANIMATION_MODE_SLIDE);
+        snackbar.getView().setOnTouchListener((view, motionEvent) -> {
+            if (motionEvent.getAction() == DragEvent.ACTION_DRAG_STARTED) {
+                snackbar.dismiss();
+            }
+            view.performClick();
+            return true;
+        });
+        snackbar.show();
     }
+    private Intent intent;
 
     private void loadContactsIfPerm() {
         if (ContextCompat.checkSelfPermission(activity
@@ -204,12 +260,22 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
             ActivityCompat.requestPermissions(activity
                     , new String[]{Manifest.permission.READ_CONTACTS, Manifest.permission.MANAGE_EXTERNAL_STORAGE, Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQUEST_CODE_ACCESS_CONTACTS);
         } else {
-            LoaderManager.getInstance(this).initLoader(CONTACTS_LOADER_ID, null, this);
-            LoaderManager.getInstance(this).initLoader(CONTACT_DETAILS_LOADER_ID, null, this);
+            if (!isMyServiceRunning(MyService.class)) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(intent);
+                } else {
+                    startService(intent);
+                }
+            }
+            /*new ContactUtil()
+                    .addLoader(new CursorLoader(this, CONTACTS_URI, CONTACTS_PROJECTION,
+                            null, null, CONTACTS_SORT), CONTACTS_LOADER_ID, this)
+                    .addLoader(new CursorLoader(this, CONTACT_DETAILS_URI, CONTACT_DETAILS_PROJECTION,
+                            null, null, CONTACTS_SORT), CONTACT_DETAILS_LOADER_ID, this);*/
         }
     }
 
-    @NonNull
+    /*@NonNull
     @Override
     public Loader<Cursor> onCreateLoader(int id, @Nullable Bundle args) {
         Log.d("AAAO", "" + id);
@@ -222,40 +288,25 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
                         null, null, CONTACTS_SORT);
         }
         return null;
-    }
-
-    static class ContactClass {
-        public String name = "";
-        public String email = "";
-        public List<String> phoneNumbers = new ArrayList<>();
-
-        public void setPhoneNumber(String phoneNumber) {
-            phoneNumbers.add(phoneNumber);
-        }
-
-        public void setName(String name) {
-            this.name = name;
-        }
-
-        public void setEmail(String email) {
-            this.email = email;
-        }
-    }
+    }*/
 
     // We can get here too contact name but not the phone number, stored at diff resolver
-    private void readContacts(Cursor cursor) {
+    /*private void readContacts(Cursor cursor) {
         mContactsByLookupKey.clear();
 
-        while (cursor.moveToNext()) {
-            ContactClass t = new ContactClass();
+        while (!cursor.isClosed() && cursor.moveToNext()) {
+            ContactPojo t = new ContactPojo();
             //String displayName = cursor.getString(cursor.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME_PRIMARY));
             String lookupKey = cursor.getString(cursor.getColumnIndex(ContactsContract.Contacts.LOOKUP_KEY));
             mContactsByLookupKey.put(lookupKey, t);
             //Log.d("AAA", "" + displayName);
+            if (cursor.isLast()) {
+                cursor.close();
+            }
         }
     }
 
-    private ContactClass readContactDetails(Cursor cursor, ContactClass contact) {
+    private ContactPojo readContactDetails(Cursor cursor, ContactPojo contact) {
         String mime = cursor.getString(cursor.getColumnIndex(ContactsContract.Data.MIMETYPE));
         //Log.d("AAA", "readContactDetails() returned: " + mime);
         if (mime.equals(ContactsContract.CommonDataKinds.Email.CONTENT_ITEM_TYPE)) {
@@ -268,6 +319,7 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
             if (name != null) contact.setName(name);
         } else if (mime.equals(ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE)) {
             String phone = cursor.getString(cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER));
+            String type = cursor.getString(cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.TYPE));
             contact.setPhoneNumber(phone);
             return contact;
         }
@@ -283,11 +335,16 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
 
             while (cursor.moveToNext()) {
                 String lookupKey = cursor.getString(cursor.getColumnIndex(ContactsContract.Data.LOOKUP_KEY));
-                ContactClass t = mContactsByLookupKey.get(lookupKey);
+                ContactPojo t = mContactsByLookupKey.get(lookupKey);
                 if (t != null) {
                     list.add(i, t);
                     list.set(i, readContactDetails(cursor, list.get(i)));
                     i += 1;
+                } else {
+                    mContactsByLookupKey.remove(lookupKey);
+                }
+                if (cursor.isAfterLast()) {
+                    cursor.close();
                 }
             }
         }
@@ -295,11 +352,11 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
 
         ObjectMapper mapper = new ObjectMapper();
         mapper.enable(SerializationFeature.INDENT_OUTPUT);
-        ContactClass t2 = null;
+        ContactPojo t2 = null;
 
         //Need better handling
         for (int i = 0; i < list.size(); i++) {
-            ContactClass t = list.get(i);
+            ContactPojo t = list.get(i);
             if (i < list.size() - 1)
                 t2 = list.get(i + 1);
 
@@ -309,7 +366,7 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
                 }
             }
         }
-        for (ContactClass test : list) {
+        for (ContactPojo test : list) {
             if (test != null) {
                 JSONObject jsonObject = new JSONObject(mapper.writeValueAsString(test));
                 arrayFinal.put(jsonObject);
@@ -338,33 +395,46 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
         else
             showSnack("Found " + arrayFinal.length() + " contacts");
         //Log.d("AAA", "readContactDetails: " + arrayFinal);
-    }
+    }*/
 
 
-    @Override
-    public void onLoadFinished(@NonNull Loader<Cursor> loader, Cursor cursor) {
-        Log.d("AAA", "Loader ID " + loader.getId());
-        switch (loader.getId()) {
-            case CONTACTS_LOADER_ID:
-                readContacts(cursor);
-                break;
+    // 2nd approach for getting contact details using accessing 2 tables from phone DB
+    private void checkContactAddedTime(Date time) {
+        cr = activity.getContentResolver();
 
-            case CONTACT_DETAILS_LOADER_ID:
-                try {
-                    readContactDetails(cursor);
-                } catch (JSONException | JsonProcessingException e) {
-                    e.printStackTrace();
+        //Cursor cur = cr.query(CONTACTS_URI, null, ContactsContract.Contacts.CONTACT_LAST_UPDATED_TIMESTAMP + " >= " + (System.currentTimeMillis() - 20000) + " AND " + System.currentTimeMillis() + " > " + ContactsContract.Contacts.CONTACT_LAST_UPDATED_TIMESTAMP, null, ContactsContract.Contacts.CONTACT_LAST_UPDATED_TIMESTAMP + " DESC");
+        Cursor cur = cr.query(CONTACTS_URI, null, null, null, ContactsContract.Contacts.CONTACT_LAST_UPDATED_TIMESTAMP + " DESC");
+
+        if ((cur != null ? cur.getCount() : 0) > 0) {
+            cur.moveToFirst();
+
+            Date contactUpdatedAt = new Date(Long.parseLong(cur.getString(cur.getColumnIndex(ContactsContract.Contacts.CONTACT_LAST_UPDATED_TIMESTAMP))));
+            //Log.d("AAAB", time + " :: " + contactUpdatedAt + " :: "+new Date(System.currentTimeMillis()));
+            //currentTime = contactUpdatedAt.getTime();
+
+            if (time.getTime() < contactUpdatedAt.getTime()) {
+                Log.d("AAAC", time + " :: " + contactUpdatedAt + " :: " + new Date(System.currentTimeMillis()));
+                //cur.getString(cur.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME_PRIMARY)
+            }
+            cur.close();
+            /*while (cur.moveToNext()) {
+                long diff = time.getTime() - contactUpdatedAt.getTime();
+                if (contactUpdatedAt.compareTo(time) >= 0) {
+                    Log.d("AAAC", contactUpdatedAt + " :: " + time + " :: " + cur.getString(cur.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME_PRIMARY)));
                 }
-                break;
+                if (TimeUnit.SECONDS.convert(diff, TimeUnit.MILLISECONDS) <= 10) {
+                    Log.d("AAA", contactUpdatedAt + " " + time + " " + cur.getString(cur.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME_PRIMARY)));
+                }
+                *//*if (contactUpdatedAt.after(time)) { // Names get updated in each record it
+                    Log.d("AAA", contactUpdatedAt + " " + time + " " + cur.getString(cur.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME_PRIMARY)));
+                }*//*
+                if (cur.isAfterLast()) {
+                    cur.close();
+                }
+            }*/
         }
     }
 
-    @Override
-    public void onLoaderReset(@NonNull Loader<Cursor> loader) {
-
-    }
-
-    // 2nd approach for getting contact details using accessing 2 tables from phone DB
     private void getContactList() {
 
         // Move to separate thread
@@ -372,7 +442,7 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
         Cursor cur = cr.query(ContactsContract.Contacts.CONTENT_URI,
                 null, null, null, null);
         if ((cur != null ? cur.getCount() : 0) > 0) {
-            while (cur != null && cur.moveToNext()) {
+            /*while (cur != null && cur.moveToNext()) {
                 String id = cur.getString(
                         cur.getColumnIndex(ContactsContract.Contacts._ID));
                 String name = cur.getString(cur.getColumnIndex(
@@ -389,12 +459,21 @@ public class ContactActivity extends AppCompatActivity implements LoaderManager.
                     while (pCur.moveToNext()) {
                         String phoneNo = pCur.getString(pCur.getColumnIndex(
                                 ContactsContract.CommonDataKinds.Phone.NUMBER));
-                        Log.i("Contact", "Name: " + name);
+                        *//*Log.i("Contact", "Name: " + name);
                         Log.i("Contact", "Phone Number: " + phoneNo);
+                        //Log.i("Contact", "Phone Number: " +pCur.getString(pCur.getColumnIndex( ContactsContract.CommonDataKinds.Phone.CONTACT_ID)));
+                        Log.i("Contact", "Phone Number: " +cur.getString(
+                                cur.getColumnIndex(ContactsContract.Contacts._ID)));*//*
                     }
                     pCur.close();
                 }
-            }
+            }*/
+            Log.d("AAA", "" + cur.getCount());
+            /*while (cur.moveToNext()) {
+                Log.d("AAA", "" + cur.getString(
+                        cur.getColumnIndex(ContactsContract.Contacts._ID)));
+            }*/
+
         } else {
             showSnack("No contacts");
         }
